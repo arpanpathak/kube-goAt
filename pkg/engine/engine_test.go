@@ -75,7 +75,33 @@ func TestEngineApply(t *testing.T) {
 		t.Fatalf("Engine second apply failed (Idempotency check): %v", err)
 	}
 
-	// 6. Test with Deserialization Error
+	// 6. Test Deletion logic: Remove deployment from DAG, apply, and assert it is deleted
+	deleteDag := dsl.NewGraph().Add(svc).Build()
+	deletePayload, _ := deleteDag.Serialize()
+	err = eng.Apply(ctx, deletePayload, stateKey)
+	if err != nil {
+		t.Fatalf("Engine third apply (deletion) failed: %v", err)
+	}
+
+	_, err = client.AppsV1().Deployments("default").Get(ctx, "test-dep", metav1.GetOptions{})
+	if err == nil {
+		t.Fatalf("Expected deployment test-dep to be deleted, but it still exists")
+	}
+
+	// 6b. Test Service deletion logic: Remove service from DAG, apply, and assert it is deleted
+	emptyDag := dsl.NewGraph().Build()
+	emptyPayload, _ := emptyDag.Serialize()
+	err = eng.Apply(ctx, emptyPayload, stateKey)
+	if err != nil {
+		t.Fatalf("Engine fourth apply (service deletion) failed: %v", err)
+	}
+
+	_, err = client.CoreV1().Services("default").Get(ctx, "test-svc", metav1.GetOptions{})
+	if err == nil {
+		t.Fatalf("Expected service test-svc to be deleted, but it still exists")
+	}
+
+	// 7. Test with Deserialization Error
 	err = eng.Apply(ctx, []byte("garbage"), stateKey)
 	if err == nil {
 		t.Errorf("Expected apply to fail on bad payload")

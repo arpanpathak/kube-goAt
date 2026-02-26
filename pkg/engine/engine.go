@@ -53,11 +53,28 @@ func (e *Engine) Apply(ctx context.Context, payload []byte, stateKey string) err
 	}
 
 	// State Check Guardrails
+	var oldDag *ast.DAG
 	existingState, err := e.store.Load(ctx, stateKey)
 	if err == nil {
 		log.Printf("[Engine] Loaded existing state for %s (%d bytes)", stateKey, len(existingState))
+		oldDag, _ = ast.Deserialize(existingState)
 	} else {
 		log.Printf("[Engine] No existing state found for %s, creating new.", stateKey)
+	}
+
+	// Deletion Loop: Track removed resources
+	if oldDag != nil {
+		for name, oldNode := range oldDag.Nodes {
+			if _, exists := dag.Nodes[name]; !exists {
+				log.Printf("[Engine] Deleting removed resource: %s (%s)", name, oldNode.Kind)
+				switch oldNode.Kind {
+				case "Service":
+					e.client.CoreV1().Services(oldNode.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
+				case "Deployment":
+					e.client.AppsV1().Deployments(oldNode.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
+				}
+			}
+		}
 	}
 
 	// Execution Loop
@@ -110,7 +127,7 @@ func (e *Engine) applyService(ctx context.Context, node *ast.Node) error {
 		},
 	}
 
-	_, err := e.client.CoreV1().Services(node.Namespace).Get(ctx, node.Name, metav1.GetOptions{})
+	existingSvc, err := e.client.CoreV1().Services(node.Namespace).Get(ctx, node.Name, metav1.GetOptions{})
 	if errors.IsNotFound(err) {
 		_, err = e.client.CoreV1().Services(node.Namespace).Create(ctx, svc, metav1.CreateOptions{})
 		log.Printf("[Engine] Created Service: %s", node.Name)
@@ -119,9 +136,12 @@ func (e *Engine) applyService(ctx context.Context, node *ast.Node) error {
 		return err
 	}
 
-	// Upsert update logic omitted for initial concise implementation
-	log.Printf("[Engine] Service %s already exists.", node.Name)
-	return nil
+	// Upsert update logic to fix drift
+	svc.ResourceVersion = existingSvc.ResourceVersion
+	svc.Spec.ClusterIP = existingSvc.Spec.ClusterIP
+	_, err = e.client.CoreV1().Services(node.Namespace).Update(ctx, svc, metav1.UpdateOptions{})
+	log.Printf("[Engine] Updated Service: %s", node.Name)
+	return err
 }
 
 func (e *Engine) applyDeployment(ctx context.Context, node *ast.Node) error {
@@ -162,7 +182,7 @@ func (e *Engine) applyDeployment(ctx context.Context, node *ast.Node) error {
 		},
 	}
 
-	_, err := e.client.AppsV1().Deployments(node.Namespace).Get(ctx, node.Name, metav1.GetOptions{})
+	existingDep, err := e.client.AppsV1().Deployments(node.Namespace).Get(ctx, node.Name, metav1.GetOptions{})
 	if errors.IsNotFound(err) {
 		_, err = e.client.AppsV1().Deployments(node.Namespace).Create(ctx, dep, metav1.CreateOptions{})
 		log.Printf("[Engine] Created Deployment: %s", node.Name)
@@ -171,6 +191,9 @@ func (e *Engine) applyDeployment(ctx context.Context, node *ast.Node) error {
 		return err
 	}
 
-	log.Printf("[Engine] Deployment %s already exists.", node.Name)
-	return nil
+	// Upsert logic for deep synchronization
+	dep.ResourceVersion = existingDep.ResourceVersion
+	_, err = e.client.AppsV1().Deployments(node.Namespace).Update(ctx, dep, metav1.UpdateOptions{})
+	log.Printf("[Engine] Updated Deployment: %s", node.Name)
+	return err
 }
