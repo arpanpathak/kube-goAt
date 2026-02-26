@@ -34,6 +34,16 @@ func NewEngine(kubeconfig string, store state.Store) (*Engine, error) {
 	return &Engine{client: clientset, store: store}, nil
 }
 
+// GetClient returns the underlying Kubernetes interface.
+func (e *Engine) GetClient() kubernetes.Interface {
+	return e.client
+}
+
+// SetStore dynamically updates the state storage backend.
+func (e *Engine) SetStore(store state.Store) {
+	e.store = store
+}
+
 // Apply takes a binary Gob AST, compares it to the tracked state, and creates/updates K8s resources.
 func (e *Engine) Apply(ctx context.Context, payload []byte, stateKey string) error {
 	// Deserialization of the "RISC" binary instructions.
