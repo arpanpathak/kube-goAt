@@ -18,7 +18,7 @@ import (
 )
 
 type Engine struct {
-	client *kubernetes.Clientset
+	client kubernetes.Interface
 	store  state.Store
 }
 

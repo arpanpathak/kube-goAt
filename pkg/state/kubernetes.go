@@ -11,11 +11,11 @@ import (
 
 // KubernetesStore implements Store by saving AST state into a Kubernetes Secret.
 type KubernetesStore struct {
-	client    *kubernetes.Clientset
+	client    kubernetes.Interface
 	namespace string
 }
 
-func NewKubernetesStore(client *kubernetes.Clientset, ns string) *KubernetesStore {
+func NewKubernetesStore(client kubernetes.Interface, ns string) *KubernetesStore {
 	return &KubernetesStore{client: client, namespace: ns}
 }
 
